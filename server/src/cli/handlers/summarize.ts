@@ -10,6 +10,7 @@ import type { EventHandler, NormalizedHookInput, HookResult } from '../types.js'
 import { ensureWorkerRunning, getWorkerPort } from '../../shared/worker-utils.js';
 import { logger } from '../../utils/logger.js';
 import { extractLastMessage } from '../../shared/transcript-parser.js';
+import { getRemoteConfig, syncSummary } from '../remote-sync.js';
 
 export const summarizeHandler: EventHandler = {
   async execute(input: NormalizedHookInput): Promise<HookResult> {
@@ -52,6 +53,22 @@ export const summarizeHandler: EventHandler = {
     }
 
     logger.debug('HOOK', 'Summary request sent successfully');
+
+    // Remote sync summary to MongoDB (non-blocking, graceful degradation)
+    // Note: We sync the lastAssistantMessage as a simple summary
+    const remoteConfig = getRemoteConfig();
+    if (remoteConfig && lastAssistantMessage) {
+      try {
+        await syncSummary(remoteConfig, {
+          session_id: sessionId,
+          summary_text: lastAssistantMessage,
+        });
+        logger.debug('HOOK', 'Summary synced to remote');
+      } catch (e) {
+        // Log warning but don't fail - local still works
+        logger.warn('HOOK', 'Remote summary sync failed', { error: (e as Error).message });
+      }
+    }
 
     return { continue: true, suppressOutput: true };
   }

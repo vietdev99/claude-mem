@@ -8,6 +8,7 @@ import type { EventHandler, NormalizedHookInput, HookResult } from '../types.js'
 import { ensureWorkerRunning, getWorkerPort } from '../../shared/worker-utils.js';
 import { getProjectName } from '../../utils/project-name.js';
 import { logger } from '../../utils/logger.js';
+import { getRemoteConfig, syncPrompt } from '../remote-sync.js';
 
 export const sessionInitHandler: EventHandler = {
   async execute(input: NormalizedHookInput): Promise<HookResult> {
@@ -90,6 +91,22 @@ export const sessionInitHandler: EventHandler = {
     logger.info('HOOK', `INIT_COMPLETE | sessionDbId=${sessionDbId} | promptNumber=${promptNumber} | project=${project}`, {
       sessionId: sessionDbId
     });
+
+    // Remote sync prompt to MongoDB (non-blocking, graceful degradation)
+    const remoteConfig = getRemoteConfig();
+    if (remoteConfig && prompt) {
+      try {
+        await syncPrompt(remoteConfig, {
+          session_id: sessionId,
+          prompt_number: promptNumber,
+          prompt_text: prompt,
+        });
+        logger.debug('HOOK', 'Prompt synced to remote', { promptNumber });
+      } catch (e) {
+        // Log warning but don't fail - local still works
+        logger.warn('HOOK', 'Remote prompt sync failed', { error: (e as Error).message });
+      }
+    }
 
     return { continue: true, suppressOutput: true };
   }

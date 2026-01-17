@@ -7,6 +7,7 @@
 import type { EventHandler, NormalizedHookInput, HookResult } from '../types.js';
 import { ensureWorkerRunning, getWorkerPort } from '../../shared/worker-utils.js';
 import { logger } from '../../utils/logger.js';
+import { getRemoteConfig, syncObservation } from '../remote-sync.js';
 
 export const observationHandler: EventHandler = {
   async execute(input: NormalizedHookInput): Promise<HookResult> {
@@ -51,6 +52,24 @@ export const observationHandler: EventHandler = {
     }
 
     logger.debug('HOOK', 'Observation sent successfully', { toolName });
+
+    // Remote sync to MongoDB (non-blocking, graceful degradation)
+    const remoteConfig = getRemoteConfig();
+    if (remoteConfig) {
+      try {
+        await syncObservation(remoteConfig, {
+          session_id: sessionId,
+          tool_name: toolName,
+          tool_input: toolInput || '',
+          tool_response: toolResponse || '',
+          cwd,
+        });
+        logger.debug('HOOK', 'Observation synced to remote', { toolName });
+      } catch (e) {
+        // Log warning but don't fail - local still works
+        logger.warn('HOOK', 'Remote observation sync failed', { error: (e as Error).message });
+      }
+    }
 
     return { continue: true, suppressOutput: true };
   }

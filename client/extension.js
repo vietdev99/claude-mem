@@ -102,7 +102,8 @@ function saveCredentials() {
         fs.writeFileSync(CREDENTIALS_PATH, JSON.stringify({
             user: currentUser,
             tokens: authTokens,
-            currentProject: currentProject
+            currentProject: currentProject,
+            serverUrl: getServerUrl()  // For remote sync hooks
         }, null, 2));
     } catch (e) {
         console.error('Failed to save credentials:', e);
