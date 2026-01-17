@@ -322,6 +322,8 @@ export class ProjectRoutes extends BaseRouteHandler {
   // ============ Context Endpoints ============
 
   private async handleGetObservations(req: Request, res: Response): Promise<void> {
+    logger.info('ProjectRoutes', 'handleGetObservations called', { path: req.path, params: req.params });
+
     if (!req.user) {
       res.status(401).json({ error: 'Not authenticated' });
       return;
