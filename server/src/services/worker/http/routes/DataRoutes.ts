@@ -47,7 +47,7 @@ export class DataRoutes extends BaseRouteHandler {
 
     // Metadata endpoints
     app.get('/api/stats', this.handleGetStats.bind(this));
-    app.get('/api/projects', this.handleGetProjects.bind(this));
+    app.get('/api/folder-projects', this.handleGetProjects.bind(this));  // Legacy: folder-based projects
 
     // Processing status endpoints
     app.get('/api/processing-status', this.handleGetProcessingStatus.bind(this));
@@ -243,8 +243,8 @@ export class DataRoutes extends BaseRouteHandler {
   });
 
   /**
-   * Get list of distinct projects from observations
-   * GET /api/projects
+   * Get list of distinct folder-based projects from observations (legacy)
+   * GET /api/folder-projects
    */
   private handleGetProjects = this.wrapHandler((req: Request, res: Response): void => {
     const db = this.dbManager.getSessionStore().db;
