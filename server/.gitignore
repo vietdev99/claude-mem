@@ -28,6 +28,6 @@ src/ui/viewer.html
 # Prevent literal tilde directories (path validation bug artifacts)
 ~*/
 
-# Prevent other malformed path directories
-http*/
-https*/
+# Prevent malformed URL-like directories at root level
+/http*/
+/https*/
