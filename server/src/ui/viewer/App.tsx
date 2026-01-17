@@ -11,6 +11,7 @@ import { useStats } from './hooks/useStats';
 import { usePagination } from './hooks/usePagination';
 import { useTheme } from './hooks/useTheme';
 import { useAuth } from './hooks/useAuth';
+import { useProjects } from './hooks/useProjects';
 import { Observation, Summary, UserPrompt } from './types';
 import { mergeAndDeduplicateByProject } from './utils/data';
 
@@ -27,10 +28,11 @@ export function App() {
   const { user, tokens, isAuthenticated, isAdmin, login, register, logout, isLoading: authLoading, error: authError, clearError } = useAuth();
 
   // These hooks are only used when authenticated, but must be called unconditionally
-  const { observations, summaries, prompts, projects, isProcessing, queueDepth, isConnected } = useSSE();
+  const { observations, summaries, prompts, projects: legacyProjects, isProcessing, queueDepth, isConnected } = useSSE();
   const { settings, saveSettings, isSaving, saveStatus } = useSettings();
   const { stats, refreshStats } = useStats();
   const { preference, resolvedTheme, setThemePreference } = useTheme();
+  const { projects: mongoProjects, currentProject, setCurrentProject, createProject } = useProjects(tokens?.accessToken || null);
   const pagination = usePagination(currentFilter);
 
   // When filtering by project: ONLY use paginated data (API-filtered)
@@ -116,7 +118,10 @@ export function App() {
     <>
       <Header
         isConnected={isConnected}
-        projects={projects}
+        legacyProjects={legacyProjects}
+        mongoProjects={mongoProjects}
+        currentProject={currentProject}
+        onProjectChange={setCurrentProject}
         currentFilter={currentFilter}
         onFilterChange={setCurrentFilter}
         isProcessing={isProcessing}
@@ -127,6 +132,12 @@ export function App() {
         user={user}
         onLogout={logout}
         onAdminClick={isAdmin ? () => setAdminPanelOpen(true) : undefined}
+        onCreateProject={() => {
+          const name = prompt('Enter project name:');
+          if (name) {
+            createProject(name).catch(err => alert(err.message));
+          }
+        }}
       />
 
       <Feed

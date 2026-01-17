@@ -3,6 +3,7 @@ import { ThemeToggle } from './ThemeToggle';
 import { ThemePreference } from '../hooks/useTheme';
 import { GitHubStarsButton } from './GitHubStarsButton';
 import { useSpinningFavicon } from '../hooks/useSpinningFavicon';
+import type { Project } from '../hooks/useProjects';
 
 interface User {
   id: string;
@@ -12,7 +13,10 @@ interface User {
 
 interface HeaderProps {
   isConnected: boolean;
-  projects: string[];
+  legacyProjects: string[];  // Folder-based projects from SSE
+  mongoProjects: Project[];   // MongoDB projects
+  currentProject: Project | null;
+  onProjectChange: (project: Project | null) => void;
   currentFilter: string;
   onFilterChange: (filter: string) => void;
   isProcessing: boolean;
@@ -23,11 +27,15 @@ interface HeaderProps {
   user?: User | null;
   onLogout?: () => void;
   onAdminClick?: () => void;
+  onCreateProject?: () => void;
 }
 
 export function Header({
   isConnected,
-  projects,
+  legacyProjects,
+  mongoProjects,
+  currentProject,
+  onProjectChange,
   currentFilter,
   onFilterChange,
   isProcessing,
@@ -37,7 +45,8 @@ export function Header({
   onContextPreviewToggle,
   user,
   onLogout,
-  onAdminClick
+  onAdminClick,
+  onCreateProject,
 }: HeaderProps) {
   useSpinningFavicon(isProcessing);
 
@@ -90,15 +99,43 @@ export function Header({
           </svg>
         </a>
         <GitHubStarsButton username="thedotmack" repo="claude-mem" />
-        <select
-          value={currentFilter}
-          onChange={e => onFilterChange(e.target.value)}
-        >
-          <option value="">All Projects</option>
-          {projects.map(project => (
-            <option key={project} value={project}>{project}</option>
-          ))}
-        </select>
+        {/* MongoDB Projects Selector */}
+        {mongoProjects.length > 0 ? (
+          <div className="project-selector">
+            <select
+              value={currentProject?.id || ''}
+              onChange={e => {
+                const project = mongoProjects.find(p => p.id === e.target.value);
+                onProjectChange(project || null);
+              }}
+            >
+              <option value="">All Projects</option>
+              {mongoProjects.map(project => (
+                <option key={project.id} value={project.id}>{project.name}</option>
+              ))}
+            </select>
+            {onCreateProject && (
+              <button
+                className="create-project-btn"
+                onClick={onCreateProject}
+                title="Create New Project"
+              >
+                +
+              </button>
+            )}
+          </div>
+        ) : (
+          /* Legacy folder-based filter */
+          <select
+            value={currentFilter}
+            onChange={e => onFilterChange(e.target.value)}
+          >
+            <option value="">All Projects</option>
+            {legacyProjects.map(project => (
+              <option key={project} value={project}>{project}</option>
+            ))}
+          </select>
+        )}
         <ThemeToggle
           preference={themePreference}
           onThemeChange={onThemeChange}
