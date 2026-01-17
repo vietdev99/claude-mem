@@ -45,10 +45,15 @@ class MongoConnection {
 
   private async doConnect(): Promise<Db> {
     try {
-      const url = this.getConnectionUrl();
       const settings = SettingsDefaultsManager.getInstance();
+      const user = settings.get('CLAUDE_MEM_MONGO_USER') || '';
+      const password = settings.get('CLAUDE_MEM_MONGO_PASSWORD') || '';
       const database = settings.get('CLAUDE_MEM_MONGO_DATABASE') || 'claudemem_db';
 
+      // Debug: log credential presence (not values)
+      console.log(`[MongoDB] Settings loaded - user: ${user ? 'SET' : 'EMPTY'}, password: ${password ? 'SET' : 'EMPTY'}, database: ${database}`);
+
+      const url = this.getConnectionUrl();
       logger.info('MongoDB', `Connecting to MongoDB at ${url.replace(/:[^:@]+@/, ':***@')}`);
 
       this.client = new MongoClient(url, {
