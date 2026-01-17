@@ -1,64 +1,33 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Header } from './components/Header';
 import { Feed } from './components/Feed';
 import { ContextSettingsModal } from './components/ContextSettingsModal';
 import { LogsDrawer } from './components/LogsModal';
 import { AuthPage } from './components/auth';
 import { AdminPanel } from './components/admin';
-import { useSSE } from './hooks/useSSE';
 import { useSettings } from './hooks/useSettings';
-import { useStats } from './hooks/useStats';
 import { usePagination } from './hooks/usePagination';
 import { useTheme } from './hooks/useTheme';
 import { useAuth } from './hooks/useAuth';
 import { useProjects } from './hooks/useProjects';
 import { Observation, Summary, UserPrompt } from './types';
-import { mergeAndDeduplicateByProject } from './utils/data';
 
 export function App() {
-  const [currentFilter, setCurrentFilter] = useState('');
   const [contextPreviewOpen, setContextPreviewOpen] = useState(false);
   const [logsModalOpen, setLogsModalOpen] = useState(false);
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
-  const [paginatedObservations, setPaginatedObservations] = useState<Observation[]>([]);
-  const [paginatedSummaries, setPaginatedSummaries] = useState<Summary[]>([]);
-  const [paginatedPrompts, setPaginatedPrompts] = useState<UserPrompt[]>([]);
+  const [observations, setObservations] = useState<Observation[]>([]);
+  const [summaries, setSummaries] = useState<Summary[]>([]);
+  const [prompts, setPrompts] = useState<UserPrompt[]>([]);
 
   // Auth hook must be called first and unconditionally
-  const { user, tokens, isAuthenticated, isAdmin, login, register, logout, isLoading: authLoading, error: authError, clearError } = useAuth();
+  const { user, tokens, isAuthenticated, isAdmin, login, register, logout, isLoading: authLoading, error: authError } = useAuth();
 
-  // These hooks are only used when authenticated, but must be called unconditionally
-  const { observations, summaries, prompts, projects: legacyProjects, isProcessing, queueDepth, isConnected } = useSSE();
+  // Other hooks
   const { settings, saveSettings, isSaving, saveStatus } = useSettings();
-  const { stats, refreshStats } = useStats();
-  const { preference, resolvedTheme, setThemePreference } = useTheme();
-  const { projects: mongoProjects, currentProject, setCurrentProject, createProject } = useProjects(tokens?.accessToken || null);
-  const pagination = usePagination(currentFilter, currentProject?.id, tokens?.accessToken);
-
-  // When filtering by project: ONLY use paginated data (API-filtered)
-  // When showing all projects: merge SSE live data with paginated data
-  const allObservations = useMemo(() => {
-    if (currentFilter) {
-      // Project filter active: API handles filtering, ignore SSE items
-      return paginatedObservations;
-    }
-    // No filter: merge SSE + paginated, deduplicate by ID
-    return mergeAndDeduplicateByProject(observations, paginatedObservations);
-  }, [observations, paginatedObservations, currentFilter]);
-
-  const allSummaries = useMemo(() => {
-    if (currentFilter) {
-      return paginatedSummaries;
-    }
-    return mergeAndDeduplicateByProject(summaries, paginatedSummaries);
-  }, [summaries, paginatedSummaries, currentFilter]);
-
-  const allPrompts = useMemo(() => {
-    if (currentFilter) {
-      return paginatedPrompts;
-    }
-    return mergeAndDeduplicateByProject(prompts, paginatedPrompts);
-  }, [prompts, paginatedPrompts, currentFilter]);
+  const { preference, setThemePreference } = useTheme();
+  const { projects, currentProject, setCurrentProject, createProject } = useProjects(tokens?.accessToken || null);
+  const pagination = usePagination(currentProject?.id || null, tokens?.accessToken || null);
 
   // Toggle context preview modal
   const toggleContextPreview = useCallback(() => {
@@ -72,6 +41,8 @@ export function App() {
 
   // Handle loading more data
   const handleLoadMore = useCallback(async () => {
+    if (!currentProject) return;
+
     try {
       const [newObservations, newSummaries, newPrompts] = await Promise.all([
         pagination.observations.loadMore(),
@@ -80,27 +51,29 @@ export function App() {
       ]);
 
       if (newObservations.length > 0) {
-        setPaginatedObservations(prev => [...prev, ...newObservations]);
+        setObservations(prev => [...prev, ...newObservations]);
       }
       if (newSummaries.length > 0) {
-        setPaginatedSummaries(prev => [...prev, ...newSummaries]);
+        setSummaries(prev => [...prev, ...newSummaries]);
       }
       if (newPrompts.length > 0) {
-        setPaginatedPrompts(prev => [...prev, ...newPrompts]);
+        setPrompts(prev => [...prev, ...newPrompts]);
       }
     } catch (error) {
       console.error('Failed to load more data:', error);
     }
-  }, [currentFilter, pagination.observations, pagination.summaries, pagination.prompts]);
+  }, [currentProject, pagination.observations, pagination.summaries, pagination.prompts]);
 
-  // Reset paginated data and load first page when filter or project changes
+  // Reset data and load first page when project changes
   useEffect(() => {
-    setPaginatedObservations([]);
-    setPaginatedSummaries([]);
-    setPaginatedPrompts([]);
-    handleLoadMore();
+    setObservations([]);
+    setSummaries([]);
+    setPrompts([]);
+    if (currentProject) {
+      handleLoadMore();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentFilter, currentProject?.id]);
+  }, [currentProject?.id]);
 
   // Show auth page if not authenticated (after all hooks)
   if (!isAuthenticated) {
@@ -117,15 +90,9 @@ export function App() {
   return (
     <>
       <Header
-        isConnected={isConnected}
-        legacyProjects={legacyProjects}
-        mongoProjects={mongoProjects}
+        projects={projects}
         currentProject={currentProject}
         onProjectChange={setCurrentProject}
-        currentFilter={currentFilter}
-        onFilterChange={setCurrentFilter}
-        isProcessing={isProcessing}
-        queueDepth={queueDepth}
         themePreference={preference}
         onThemeChange={setThemePreference}
         onContextPreviewToggle={toggleContextPreview}
@@ -141,9 +108,9 @@ export function App() {
       />
 
       <Feed
-        observations={allObservations}
-        summaries={allSummaries}
-        prompts={allPrompts}
+        observations={observations}
+        summaries={summaries}
+        prompts={prompts}
         onLoadMore={handleLoadMore}
         isLoading={pagination.observations.isLoading || pagination.summaries.isLoading || pagination.prompts.isLoading}
         hasMore={pagination.observations.hasMore || pagination.summaries.hasMore || pagination.prompts.hasMore}
@@ -156,7 +123,7 @@ export function App() {
         onSave={saveSettings}
         isSaving={isSaving}
         saveStatus={saveStatus}
-        projects={mongoProjects}
+        projects={projects}
         currentProject={currentProject}
         accessToken={tokens?.accessToken || null}
       />

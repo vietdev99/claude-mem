@@ -2,7 +2,6 @@ import React from 'react';
 import { ThemeToggle } from './ThemeToggle';
 import { ThemePreference } from '../hooks/useTheme';
 import { GitHubStarsButton } from './GitHubStarsButton';
-import { useSpinningFavicon } from '../hooks/useSpinningFavicon';
 import type { Project } from '../hooks/useProjects';
 
 interface User {
@@ -12,15 +11,9 @@ interface User {
 }
 
 interface HeaderProps {
-  isConnected: boolean;
-  legacyProjects: string[];  // Folder-based projects from SSE
-  mongoProjects: Project[];   // MongoDB projects
+  projects: Project[];
   currentProject: Project | null;
   onProjectChange: (project: Project | null) => void;
-  currentFilter: string;
-  onFilterChange: (filter: string) => void;
-  isProcessing: boolean;
-  queueDepth: number;
   themePreference: ThemePreference;
   onThemeChange: (theme: ThemePreference) => void;
   onContextPreviewToggle: () => void;
@@ -31,15 +24,9 @@ interface HeaderProps {
 }
 
 export function Header({
-  isConnected,
-  legacyProjects,
-  mongoProjects,
+  projects,
   currentProject,
   onProjectChange,
-  currentFilter,
-  onFilterChange,
-  isProcessing,
-  queueDepth,
   themePreference,
   onThemeChange,
   onContextPreviewToggle,
@@ -48,18 +35,11 @@ export function Header({
   onAdminClick,
   onCreateProject,
 }: HeaderProps) {
-  useSpinningFavicon(isProcessing);
-
   return (
     <div className="header">
       <h1>
         <div style={{ position: 'relative', display: 'inline-block' }}>
-          <img src="claude-mem-logomark.webp" alt="" className={`logomark ${isProcessing ? 'spinning' : ''}`} />
-          {queueDepth > 0 && (
-            <div className="queue-bubble">
-              {queueDepth}
-            </div>
-          )}
+          <img src="claude-mem-logomark.webp" alt="" className="logomark" />
         </div>
         <span className="logo-text">claude-mem</span>
       </h1>
@@ -99,43 +79,32 @@ export function Header({
           </svg>
         </a>
         <GitHubStarsButton username="thedotmack" repo="claude-mem" />
-        {/* MongoDB Projects Selector */}
-        {mongoProjects.length > 0 ? (
-          <div className="project-selector">
-            <select
-              value={currentProject?.id || ''}
-              onChange={e => {
-                const project = mongoProjects.find(p => p.id === e.target.value);
-                onProjectChange(project || null);
-              }}
-            >
-              <option value="">All Projects</option>
-              {mongoProjects.map(project => (
-                <option key={project.id} value={project.id}>{project.name}</option>
-              ))}
-            </select>
-            {onCreateProject && (
-              <button
-                className="create-project-btn"
-                onClick={onCreateProject}
-                title="Create New Project"
-              >
-                +
-              </button>
-            )}
-          </div>
-        ) : (
-          /* Legacy folder-based filter */
+
+        {/* Project Selector */}
+        <div className="project-selector">
           <select
-            value={currentFilter}
-            onChange={e => onFilterChange(e.target.value)}
+            value={currentProject?.id || ''}
+            onChange={e => {
+              const project = projects.find(p => p.id === e.target.value);
+              onProjectChange(project || null);
+            }}
           >
-            <option value="">All Projects</option>
-            {legacyProjects.map(project => (
-              <option key={project} value={project}>{project}</option>
+            <option value="" disabled>Select Project</option>
+            {projects.map(project => (
+              <option key={project.id} value={project.id}>{project.name}</option>
             ))}
           </select>
-        )}
+          {onCreateProject && (
+            <button
+              className="create-project-btn"
+              onClick={onCreateProject}
+              title="Create New Project"
+            >
+              +
+            </button>
+          )}
+        </div>
+
         <ThemeToggle
           preference={themePreference}
           onThemeChange={onThemeChange}
