@@ -33,7 +33,7 @@ export function App() {
   const { stats, refreshStats } = useStats();
   const { preference, resolvedTheme, setThemePreference } = useTheme();
   const { projects: mongoProjects, currentProject, setCurrentProject, createProject } = useProjects(tokens?.accessToken || null);
-  const pagination = usePagination(currentFilter);
+  const pagination = usePagination(currentFilter, currentProject?.id, tokens?.accessToken);
 
   // When filtering by project: ONLY use paginated data (API-filtered)
   // When showing all projects: merge SSE live data with paginated data
@@ -93,14 +93,14 @@ export function App() {
     }
   }, [currentFilter, pagination.observations, pagination.summaries, pagination.prompts]);
 
-  // Reset paginated data and load first page when filter changes
+  // Reset paginated data and load first page when filter or project changes
   useEffect(() => {
     setPaginatedObservations([]);
     setPaginatedSummaries([]);
     setPaginatedPrompts([]);
     handleLoadMore();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentFilter]);
+  }, [currentFilter, currentProject?.id]);
 
   // Show auth page if not authenticated (after all hooks)
   if (!isAuthenticated) {
