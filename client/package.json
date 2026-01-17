@@ -1,0 +1,62 @@
+{
+	"name": "vclaudemem",
+	"displayName": "VClaudeMem",
+	"description": "Claude-Mem VSCode extension with user authentication",
+	"version": "1.1.0",
+	"publisher": "local",
+	"engines": {
+		"vscode": "^1.85.0"
+	},
+	"categories": [
+		"Other"
+	],
+	"activationEvents": [
+		"onStartupFinished"
+	],
+	"main": "./extension.js",
+	"contributes": {
+		"commands": [
+			{
+				"command": "claude-mem.saveContext",
+				"title": "Claude-Mem: Save Context"
+			},
+			{
+				"command": "claude-mem.openViewer",
+				"title": "Claude-Mem: Open Viewer"
+			},
+			{
+				"command": "claude-mem.startWorker",
+				"title": "Claude-Mem: Start Worker"
+			},
+			{
+				"command": "claude-mem.login",
+				"title": "Claude-Mem: Login"
+			},
+			{
+				"command": "claude-mem.logout",
+				"title": "Claude-Mem: Logout"
+			},
+			{
+				"command": "claude-mem.showUserPanel",
+				"title": "Claude-Mem: Show User Panel"
+			}
+		],
+		"keybindings": [
+			{
+				"command": "claude-mem.saveContext",
+				"key": "ctrl+alt+m",
+				"mac": "cmd+alt+m"
+			}
+		],
+		"configuration": {
+			"title": "Claude-Mem",
+			"properties": {
+				"claude-mem.serverUrl": {
+					"type": "string",
+					"default": "http://localhost:37777",
+					"description": "Claude-Mem server URL"
+				}
+			}
+		}
+	}
+}
