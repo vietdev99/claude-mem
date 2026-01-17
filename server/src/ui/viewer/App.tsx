@@ -23,24 +23,15 @@ export function App() {
   const [paginatedSummaries, setPaginatedSummaries] = useState<Summary[]>([]);
   const [paginatedPrompts, setPaginatedPrompts] = useState<UserPrompt[]>([]);
 
+  // Auth hook must be called first and unconditionally
+  const { user, tokens, isAuthenticated, isAdmin, login, register, logout, isLoading: authLoading, error: authError, clearError } = useAuth();
+
+  // These hooks are only used when authenticated, but must be called unconditionally
   const { observations, summaries, prompts, projects, isProcessing, queueDepth, isConnected } = useSSE();
   const { settings, saveSettings, isSaving, saveStatus } = useSettings();
   const { stats, refreshStats } = useStats();
   const { preference, resolvedTheme, setThemePreference } = useTheme();
-  const { user, tokens, isAuthenticated, isAdmin, login, register, logout, isLoading: authLoading, error: authError, clearError } = useAuth();
   const pagination = usePagination(currentFilter);
-
-  // Show auth page if not authenticated
-  if (!isAuthenticated) {
-    return (
-      <AuthPage
-        onLogin={login}
-        onRegister={register}
-        isLoading={authLoading}
-        error={authError}
-      />
-    );
-  }
 
   // When filtering by project: ONLY use paginated data (API-filtered)
   // When showing all projects: merge SSE live data with paginated data
@@ -108,6 +99,18 @@ export function App() {
     handleLoadMore();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentFilter]);
+
+  // Show auth page if not authenticated (after all hooks)
+  if (!isAuthenticated) {
+    return (
+      <AuthPage
+        onLogin={login}
+        onRegister={register}
+        isLoading={authLoading}
+        error={authError}
+      />
+    );
+  }
 
   return (
     <>
