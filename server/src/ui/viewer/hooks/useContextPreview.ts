@@ -1,39 +1,37 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Settings } from '../types';
+import type { Project } from './useProjects';
 
 interface UseContextPreviewResult {
   preview: string;
   isLoading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
-  projects: string[];
-  selectedProject: string | null;
-  setSelectedProject: (project: string) => void;
+  selectedProject: Project | null;
+  setSelectedProject: (project: Project | null) => void;
 }
 
-export function useContextPreview(settings: Settings): UseContextPreviewResult {
+interface UseContextPreviewProps {
+  settings: Settings;
+  projects: Project[];
+  currentProject: Project | null;
+  accessToken: string | null;
+}
+
+export function useContextPreview({ settings, projects, currentProject, accessToken }: UseContextPreviewProps): UseContextPreviewResult {
   const [preview, setPreview] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [projects, setProjects] = useState<string[]>([]);
-  const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [selectedProject, setSelectedProject] = useState<Project | null>(currentProject);
 
-  // Fetch projects on mount
+  // Update selected project when currentProject changes
   useEffect(() => {
-    async function fetchProjects() {
-      try {
-        const response = await fetch('/api/projects');
-        const data = await response.json();
-        if (data.projects && data.projects.length > 0) {
-          setProjects(data.projects);
-          setSelectedProject(data.projects[0]); // Default to first project
-        }
-      } catch (err) {
-        console.error('Failed to fetch projects:', err);
-      }
+    if (currentProject) {
+      setSelectedProject(currentProject);
+    } else if (projects.length > 0 && !selectedProject) {
+      setSelectedProject(projects[0]);
     }
-    fetchProjects();
-  }, []);
+  }, [currentProject, projects]);
 
   const refresh = useCallback(async () => {
     if (!selectedProject) {
@@ -41,24 +39,53 @@ export function useContextPreview(settings: Settings): UseContextPreviewResult {
       return;
     }
 
+    if (!accessToken) {
+      setPreview('Please login to view context');
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
 
-    const params = new URLSearchParams({
-      project: selectedProject
-    });
+    try {
+      // Fetch context from project
+      const response = await fetch(`/api/projects/${selectedProject.id}/context`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
 
-    const response = await fetch(`/api/context/preview?${params}`);
-    const text = await response.text();
+      if (response.ok) {
+        const data = await response.json();
+        // Format context for preview
+        const contextLines: string[] = [];
 
-    if (response.ok) {
-      setPreview(text);
-    } else {
+        if (data.observations?.length > 0) {
+          contextLines.push(`## Observations (${data.observations.length})`);
+          data.observations.forEach((obs: any) => {
+            const type = obs.observation_type || 'note';
+            contextLines.push(`- [${type}] ${obs.narrative || obs.tool_response || ''}`);
+          });
+        }
+
+        if (data.summaries?.length > 0) {
+          contextLines.push('');
+          contextLines.push(`## Summaries (${data.summaries.length})`);
+          data.summaries.forEach((sum: any) => {
+            contextLines.push(`- ${sum.content || ''}`);
+          });
+        }
+
+        setPreview(contextLines.length > 0 ? contextLines.join('\n') : 'No context yet. Save some observations!');
+      } else {
+        setError('Failed to load preview');
+      }
+    } catch (err) {
       setError('Failed to load preview');
     }
 
     setIsLoading(false);
-  }, [selectedProject]);
+  }, [selectedProject, accessToken]);
 
   // Debounced refresh when settings or selectedProject change
   useEffect(() => {
@@ -68,5 +95,5 @@ export function useContextPreview(settings: Settings): UseContextPreviewResult {
     return () => clearTimeout(timeout);
   }, [settings, refresh]);
 
-  return { preview, isLoading, error, refresh, projects, selectedProject, setSelectedProject };
+  return { preview, isLoading, error, refresh, selectedProject, setSelectedProject };
 }

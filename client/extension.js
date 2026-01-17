@@ -66,7 +66,8 @@ function activate(context) {
         vscode.commands.registerCommand('claude-mem.logout', logout),
         vscode.commands.registerCommand('claude-mem.showUserPanel', showUserPanel),
         vscode.commands.registerCommand('claude-mem.selectProject', selectProject),
-        vscode.commands.registerCommand('claude-mem.createProject', createProject)
+        vscode.commands.registerCommand('claude-mem.createProject', createProject),
+        vscode.commands.registerCommand('claude-mem.viewContext', viewContext)
     );
 
     // If logged in, fetch projects
@@ -203,8 +204,9 @@ function showUserPanel() {
         const items = [
             { label: '$(folder) Switch Project', description: currentProject?.name || 'None', action: 'switch' },
             { label: '$(add) Create Project', description: 'Create a new project', action: 'create' },
-            { label: '$(browser) Open Viewer', description: 'Open VClaudeMem in browser', action: 'viewer' },
+            { label: '$(eye) View Context', description: 'View observations from project', action: 'view' },
             { label: '$(note) Save Context', description: 'Save current context to project', action: 'save' },
+            { label: '$(browser) Open Viewer', description: 'Open VClaudeMem in browser', action: 'viewer' },
             { label: '$(person) Profile', description: `${currentUser.username} (${currentUser.role})`, action: 'profile' },
             { label: '$(sign-out) Logout', description: 'Sign out of VClaudeMem', action: 'logout' }
         ];
@@ -214,6 +216,7 @@ function showUserPanel() {
             switch (selected.action) {
                 case 'switch': selectProject(); break;
                 case 'create': createProject(); break;
+                case 'view': viewContext(); break;
                 case 'viewer': openViewer(); break;
                 case 'save': saveContext(); break;
                 case 'logout': logout(); break;
@@ -316,6 +319,180 @@ async function createProject() {
     } catch (e) {
         vscode.window.showErrorMessage('Failed to create project: ' + e.message);
     }
+}
+
+let contextPanel = null;
+
+async function viewContext() {
+    if (!currentUser) {
+        showLoginPanel();
+        return;
+    }
+
+    if (!currentProject) {
+        const action = await vscode.window.showWarningMessage(
+            'Please select a project first',
+            'Select Project'
+        );
+        if (action === 'Select Project') {
+            selectProject();
+        }
+        return;
+    }
+
+    try {
+        // Fetch observations from project
+        const result = await httpRequest({
+            hostname: getServerHost(),
+            port: getWorkerPort(),
+            path: `/api/projects/${currentProject.id}/observations?limit=50`,
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${authTokens.accessToken}`
+            }
+        });
+
+        if (result.statusCode === 200) {
+            const data = JSON.parse(result.body);
+            showContextPanel(data.observations || []);
+        } else if (result.statusCode === 401) {
+            vscode.window.showWarningMessage('Session expired. Please login again.');
+            clearCredentials();
+            updateStatusBar();
+        } else {
+            const error = JSON.parse(result.body);
+            vscode.window.showErrorMessage(error.error || 'Failed to load context');
+        }
+    } catch (error) {
+        vscode.window.showErrorMessage(`Failed to load context: ${error.message}`);
+    }
+}
+
+function showContextPanel(observations) {
+    if (contextPanel) {
+        contextPanel.reveal();
+    } else {
+        contextPanel = vscode.window.createWebviewPanel(
+            'claudeMemContext',
+            `Context: ${currentProject.name}`,
+            vscode.ViewColumn.One,
+            { enableScripts: true }
+        );
+
+        contextPanel.onDidDispose(() => {
+            contextPanel = null;
+        });
+    }
+
+    contextPanel.webview.html = getContextPanelHtml(observations);
+}
+
+function getContextPanelHtml(observations) {
+    const observationItems = observations.map(obs => {
+        const date = new Date(obs.created_at || obs.timestamp).toLocaleString();
+        const type = obs.observation_type || 'note';
+        const typeIcon = {
+            'bugfix': '🐛',
+            'feature': '⭐',
+            'refactor': '🔧',
+            'discovery': '💡',
+            'note': '📝',
+            'decision': '🎯',
+            'change': '📦'
+        }[type] || '📝';
+
+        return `
+            <div class="observation">
+                <div class="obs-header">
+                    <span class="obs-type">${typeIcon} ${type}</span>
+                    <span class="obs-date">${date}</span>
+                </div>
+                <div class="obs-content">${escapeHtml(obs.narrative || obs.tool_response || '')}</div>
+                ${obs.cwd ? `<div class="obs-path">${escapeHtml(obs.cwd)}</div>` : ''}
+            </div>
+        `;
+    }).join('');
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            padding: 20px;
+            color: var(--vscode-foreground);
+            background: var(--vscode-editor-background);
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--vscode-panel-border);
+        }
+        .header h2 {
+            margin: 0;
+            font-weight: 500;
+        }
+        .count {
+            color: var(--vscode-descriptionForeground);
+            font-size: 14px;
+        }
+        .observation {
+            background: var(--vscode-editor-inactiveSelectionBackground);
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+        .obs-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .obs-type {
+            font-weight: 500;
+            text-transform: capitalize;
+        }
+        .obs-date {
+            color: var(--vscode-descriptionForeground);
+            font-size: 12px;
+        }
+        .obs-content {
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+        .obs-path {
+            margin-top: 8px;
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground);
+            font-family: monospace;
+        }
+        .empty {
+            text-align: center;
+            padding: 40px;
+            color: var(--vscode-descriptionForeground);
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h2>${escapeHtml(currentProject.name)}</h2>
+        <span class="count">${observations.length} observations</span>
+    </div>
+    ${observations.length > 0 ? observationItems : '<div class="empty">No observations yet. Save some context!</div>'}
+</body>
+</html>`;
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 }
 
 function showLoginPanel() {
@@ -795,6 +972,7 @@ function deactivate() {
     if (statusBarItem) statusBarItem.dispose();
     if (loginPanel) loginPanel.dispose();
     if (projectPanel) projectPanel.dispose();
+    if (contextPanel) contextPanel.dispose();
 }
 
 module.exports = { activate, deactivate };

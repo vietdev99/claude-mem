@@ -156,6 +156,9 @@ export function App() {
         onSave={saveSettings}
         isSaving={isSaving}
         saveStatus={saveStatus}
+        projects={mongoProjects}
+        currentProject={currentProject}
+        accessToken={tokens?.accessToken || null}
       />
 
       <button

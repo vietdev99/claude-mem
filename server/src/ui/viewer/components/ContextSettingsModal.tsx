@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import type { Settings } from '../types';
 import { TerminalPreview } from './TerminalPreview';
 import { useContextPreview } from '../hooks/useContextPreview';
+import type { Project } from '../hooks/useProjects';
 
 interface ContextSettingsModalProps {
   isOpen: boolean;
@@ -10,6 +11,9 @@ interface ContextSettingsModalProps {
   onSave: (settings: Settings) => void;
   isSaving: boolean;
   saveStatus: string;
+  projects: Project[];
+  currentProject: Project | null;
+  accessToken: string | null;
 }
 
 // Collapsible section component
@@ -182,7 +186,10 @@ export function ContextSettingsModal({
   settings,
   onSave,
   isSaving,
-  saveStatus
+  saveStatus,
+  projects,
+  currentProject,
+  accessToken
 }: ContextSettingsModalProps) {
   const [formState, setFormState] = useState<Settings>(settings);
 
@@ -192,7 +199,12 @@ export function ContextSettingsModal({
   }, [settings]);
 
   // Get context preview based on current form state
-  const { preview, isLoading, error, projects, selectedProject, setSelectedProject } = useContextPreview(formState);
+  const { preview, isLoading, error, selectedProject, setSelectedProject } = useContextPreview({
+    settings: formState,
+    projects,
+    currentProject,
+    accessToken
+  });
 
   const updateSetting = useCallback((key: keyof Settings, value: string) => {
     const newState = { ...formState, [key]: value };
@@ -253,11 +265,15 @@ export function ContextSettingsModal({
             <label className="preview-selector">
               Preview for:
               <select
-                value={selectedProject || ''}
-                onChange={(e) => setSelectedProject(e.target.value)}
+                value={selectedProject?.id || ''}
+                onChange={(e) => {
+                  const project = projects.find(p => p.id === e.target.value);
+                  setSelectedProject(project || null);
+                }}
               >
+                {projects.length === 0 && <option value="">No projects</option>}
                 {projects.map(project => (
-                  <option key={project} value={project}>{project}</option>
+                  <option key={project.id} value={project.id}>{project.name}</option>
                 ))}
               </select>
             </label>
