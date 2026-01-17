@@ -70,6 +70,7 @@ import { SettingsRoutes } from './worker/http/routes/SettingsRoutes.js';
 import { LogsRoutes } from './worker/http/routes/LogsRoutes.js';
 import { AuthRoutes } from './worker/http/routes/AuthRoutes.js';
 import { AdminRoutes } from './worker/http/routes/AdminRoutes.js';
+import { ProjectRoutes } from './worker/http/routes/ProjectRoutes.js';
 
 /**
  * Build JSON status output for hook framework communication.
@@ -192,6 +193,7 @@ export class WorkerService {
     // Auth routes (must be registered first for middleware order)
     this.server.registerRoutes(new AuthRoutes());
     this.server.registerRoutes(new AdminRoutes());
+    this.server.registerRoutes(new ProjectRoutes());
 
     // Standard routes
     this.server.registerRoutes(new ViewerRoutes(this.sseBroadcaster, this.dbManager, this.sessionManager));

@@ -236,6 +236,7 @@ export class AdminRoutes extends BaseRouteHandler {
    * Get system statistics
    */
   private async handleGetStats(req: Request, res: Response): Promise<void> {
+    const db = await mongoConnection.getDb();
     const users = await mongoConnection.getUsersCollection();
 
     const [totalUsers, adminCount, activeUsers] = await Promise.all([
@@ -244,13 +245,43 @@ export class AdminRoutes extends BaseRouteHandler {
       users.countDocuments({ is_active: true }),
     ]);
 
+    // Get data stats from MongoDB collections (if they exist)
+    let observationsCount = 0;
+    let summariesCount = 0;
+    let promptsCount = 0;
+    let projectsCount = 0;
+
+    try {
+      const collections = await db.listCollections().toArray();
+      const collectionNames = collections.map(c => c.name);
+
+      if (collectionNames.includes('observations')) {
+        observationsCount = await db.collection('observations').countDocuments();
+      }
+      if (collectionNames.includes('summaries')) {
+        summariesCount = await db.collection('summaries').countDocuments();
+      }
+      if (collectionNames.includes('user_prompts')) {
+        promptsCount = await db.collection('user_prompts').countDocuments();
+      }
+      if (collectionNames.includes('projects')) {
+        projectsCount = await db.collection('projects').countDocuments();
+      }
+    } catch (error) {
+      logger.debug('Admin', 'Some collections may not exist yet', {}, error as Error);
+    }
+
     res.json({
       users: {
         total: totalUsers,
-        admins: adminCount,
-        members: totalUsers - adminCount,
         active: activeUsers,
-        inactive: totalUsers - activeUsers,
+        admins: adminCount,
+      },
+      data: {
+        observations: observationsCount,
+        summaries: summariesCount,
+        prompts: promptsCount,
+        projects: projectsCount,
       },
     });
   }

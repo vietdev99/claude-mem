@@ -1,5 +1,4 @@
 const vscode = require('vscode');
-const { exec } = require('child_process');
 const path = require('path');
 const os = require('os');
 const http = require('http');
@@ -7,18 +6,19 @@ const https = require('https');
 const fs = require('fs');
 
 const HOME = os.homedir();
-const BUN_PATH = path.join(HOME, '.bun', 'bin', 'bun.exe');
-const WORKER_SCRIPT = path.join(HOME, '.claude', 'plugins', 'marketplaces', 'thedotmack', 'scripts', 'worker-service.cjs');
 const CREDENTIALS_PATH = path.join(HOME, '.claude-mem', 'credentials.json');
 
 let statusBarItem;
 let currentUser = null;
 let authTokens = null;
+let currentProject = null;
+let userProjects = [];
 let loginPanel = null;
+let projectPanel = null;
 
 function getServerUrl() {
     const config = vscode.workspace.getConfiguration('claude-mem');
-    return config.get('serverUrl') || 'http://localhost:37777';
+    return config.get('serverUrl') || 'https://mcpclaude.vollx.com';
 }
 
 function getWorkerPort() {
@@ -27,7 +27,7 @@ function getWorkerPort() {
         const url = new URL(serverUrl);
         return parseInt(url.port) || (url.protocol === 'https:' ? 443 : 80);
     } catch {
-        return 37777;
+        return 443;
     }
 }
 
@@ -37,7 +37,7 @@ function getServerHost() {
         const url = new URL(serverUrl);
         return url.hostname;
     } catch {
-        return '127.0.0.1';
+        return 'mcpclaude.vollx.com';
     }
 }
 
@@ -46,7 +46,7 @@ function isHttps() {
 }
 
 function activate(context) {
-    console.log('Claude-Mem extension activating...');
+    console.log('VClaudeMem extension activating...');
 
     // Load saved credentials
     loadCredentials();
@@ -62,15 +62,16 @@ function activate(context) {
     context.subscriptions.push(
         vscode.commands.registerCommand('claude-mem.saveContext', saveContext),
         vscode.commands.registerCommand('claude-mem.openViewer', openViewer),
-        vscode.commands.registerCommand('claude-mem.startWorker', startWorker),
         vscode.commands.registerCommand('claude-mem.login', showLoginPanel),
         vscode.commands.registerCommand('claude-mem.logout', logout),
-        vscode.commands.registerCommand('claude-mem.showUserPanel', showUserPanel)
+        vscode.commands.registerCommand('claude-mem.showUserPanel', showUserPanel),
+        vscode.commands.registerCommand('claude-mem.selectProject', selectProject),
+        vscode.commands.registerCommand('claude-mem.createProject', createProject)
     );
 
-    // Auto start worker only for localhost
-    if (getServerHost() === '127.0.0.1' || getServerHost() === 'localhost') {
-        startWorker();
+    // If logged in, fetch projects
+    if (currentUser && authTokens) {
+        fetchProjects();
     }
 
     // Check status periodically
@@ -84,6 +85,7 @@ function loadCredentials() {
             const data = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
             currentUser = data.user || null;
             authTokens = data.tokens || null;
+            currentProject = data.currentProject || null;
         }
     } catch (e) {
         console.error('Failed to load credentials:', e);
@@ -98,7 +100,8 @@ function saveCredentials() {
         }
         fs.writeFileSync(CREDENTIALS_PATH, JSON.stringify({
             user: currentUser,
-            tokens: authTokens
+            tokens: authTokens,
+            currentProject: currentProject
         }, null, 2));
     } catch (e) {
         console.error('Failed to save credentials:', e);
@@ -115,16 +118,19 @@ function clearCredentials() {
     }
     currentUser = null;
     authTokens = null;
+    currentProject = null;
+    userProjects = [];
 }
 
 function updateStatusBar() {
     if (currentUser) {
-        statusBarItem.text = `$(database) Claude-Mem: ${currentUser.username}`;
-        statusBarItem.tooltip = `Logged in as ${currentUser.username} (${currentUser.role})\nClick for options`;
-        statusBarItem.backgroundColor = undefined;
+        const projectName = currentProject ? currentProject.name : 'No Project';
+        statusBarItem.text = `$(database) ${projectName}`;
+        statusBarItem.tooltip = `VClaudeMem: ${currentUser.username}\nProject: ${projectName}\nClick for options`;
+        statusBarItem.backgroundColor = currentProject ? undefined : new vscode.ThemeColor('statusBarItem.warningBackground');
     } else {
-        statusBarItem.text = '$(account) Claude-Mem: Login';
-        statusBarItem.tooltip = 'Click to login to Claude-Mem';
+        statusBarItem.text = '$(account) VClaudeMem';
+        statusBarItem.tooltip = 'Click to login to VClaudeMem';
         statusBarItem.backgroundColor = undefined;
     }
 }
@@ -141,31 +147,20 @@ function checkWorkerStatus() {
     const httpModule = isHttps() ? https : http;
     const req = httpModule.request(options, (res) => {
         if (res.statusCode === 200) {
-            if (currentUser) {
-                statusBarItem.text = `$(database) Claude-Mem: ${currentUser.username}`;
-            } else {
-                statusBarItem.text = '$(account) Claude-Mem: Login';
+            // Server is online
+            if (!currentUser) {
+                statusBarItem.text = '$(account) VClaudeMem';
             }
-            statusBarItem.backgroundColor = undefined;
         }
     });
 
     req.on('error', () => {
-        statusBarItem.text = '$(warning) Claude-Mem: Offline';
-        statusBarItem.tooltip = 'Claude-Mem: Server offline';
-        statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+        statusBarItem.text = '$(warning) VClaudeMem: Offline';
+        statusBarItem.tooltip = 'VClaudeMem: Server offline';
+        statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
     });
 
     req.end();
-}
-
-function startWorker() {
-    exec(`"${BUN_PATH}" "${WORKER_SCRIPT}" start`, { timeout: 15000 }, (error, stdout) => {
-        if (error && !stdout?.includes('ready')) {
-            console.error('Claude-Mem worker error:', error);
-        }
-        setTimeout(checkWorkerStatus, 2000);
-    });
 }
 
 function openViewer() {
@@ -173,17 +168,52 @@ function openViewer() {
     vscode.env.openExternal(vscode.Uri.parse(serverUrl));
 }
 
+async function fetchProjects() {
+    if (!authTokens?.accessToken) return;
+
+    try {
+        const result = await httpRequest({
+            hostname: getServerHost(),
+            port: getWorkerPort(),
+            path: '/api/projects',
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${authTokens.accessToken}`
+            }
+        });
+
+        if (result.statusCode === 200) {
+            const data = JSON.parse(result.body);
+            userProjects = data.projects || [];
+
+            // If no current project and we have projects, select the first one
+            if (!currentProject && userProjects.length > 0) {
+                currentProject = userProjects[0];
+                saveCredentials();
+                updateStatusBar();
+            }
+        }
+    } catch (e) {
+        console.error('Failed to fetch projects:', e);
+    }
+}
+
 function showUserPanel() {
     if (currentUser) {
-        // Show quick pick with options
-        vscode.window.showQuickPick([
-            { label: '$(browser) Open Viewer', description: 'Open Claude-Mem in browser', action: 'viewer' },
-            { label: '$(note) Save Context', description: 'Save current context', action: 'save' },
+        const items = [
+            { label: '$(folder) Switch Project', description: currentProject?.name || 'None', action: 'switch' },
+            { label: '$(add) Create Project', description: 'Create a new project', action: 'create' },
+            { label: '$(browser) Open Viewer', description: 'Open VClaudeMem in browser', action: 'viewer' },
+            { label: '$(note) Save Context', description: 'Save current context to project', action: 'save' },
             { label: '$(person) Profile', description: `${currentUser.username} (${currentUser.role})`, action: 'profile' },
-            { label: '$(sign-out) Logout', description: 'Sign out of Claude-Mem', action: 'logout' }
-        ], { placeHolder: 'Claude-Mem Options' }).then(selected => {
+            { label: '$(sign-out) Logout', description: 'Sign out of VClaudeMem', action: 'logout' }
+        ];
+
+        vscode.window.showQuickPick(items, { placeHolder: 'VClaudeMem Options' }).then(selected => {
             if (!selected) return;
             switch (selected.action) {
+                case 'switch': selectProject(); break;
+                case 'create': createProject(); break;
                 case 'viewer': openViewer(); break;
                 case 'save': saveContext(); break;
                 case 'logout': logout(); break;
@@ -197,6 +227,97 @@ function showUserPanel() {
     }
 }
 
+async function selectProject() {
+    if (!currentUser) {
+        showLoginPanel();
+        return;
+    }
+
+    // Refresh projects list
+    await fetchProjects();
+
+    if (userProjects.length === 0) {
+        const action = await vscode.window.showInformationMessage(
+            'You don\'t have any projects yet.',
+            'Create Project'
+        );
+        if (action === 'Create Project') {
+            createProject();
+        }
+        return;
+    }
+
+    const items = userProjects.map(p => ({
+        label: p.name,
+        description: `${p.role} • ${p.member_count || 1} members`,
+        detail: p.description || '',
+        project: p
+    }));
+
+    const selected = await vscode.window.showQuickPick(items, {
+        placeHolder: 'Select a project'
+    });
+
+    if (selected) {
+        currentProject = selected.project;
+        saveCredentials();
+        updateStatusBar();
+        vscode.window.showInformationMessage(`Switched to project: ${currentProject.name}`);
+    }
+}
+
+async function createProject() {
+    if (!currentUser) {
+        showLoginPanel();
+        return;
+    }
+
+    const name = await vscode.window.showInputBox({
+        prompt: 'Project name',
+        placeHolder: 'My Project',
+        validateInput: (value) => {
+            if (!value || value.trim().length < 2) {
+                return 'Project name must be at least 2 characters';
+            }
+            return null;
+        }
+    });
+
+    if (!name) return;
+
+    const description = await vscode.window.showInputBox({
+        prompt: 'Project description (optional)',
+        placeHolder: 'A brief description of this project'
+    });
+
+    try {
+        const result = await httpRequest({
+            hostname: getServerHost(),
+            port: getWorkerPort(),
+            path: '/api/projects',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authTokens.accessToken}`
+            }
+        }, JSON.stringify({ name: name.trim(), description: description?.trim() || '' }));
+
+        if (result.statusCode === 201) {
+            const project = JSON.parse(result.body);
+            currentProject = project;
+            userProjects.push(project);
+            saveCredentials();
+            updateStatusBar();
+            vscode.window.showInformationMessage(`Project "${project.name}" created!`);
+        } else {
+            const error = JSON.parse(result.body);
+            vscode.window.showErrorMessage(error.error || 'Failed to create project');
+        }
+    } catch (e) {
+        vscode.window.showErrorMessage('Failed to create project: ' + e.message);
+    }
+}
+
 function showLoginPanel() {
     if (loginPanel) {
         loginPanel.reveal();
@@ -205,7 +326,7 @@ function showLoginPanel() {
 
     loginPanel = vscode.window.createWebviewPanel(
         'claudeMemLogin',
-        'Claude-Mem Login',
+        'VClaudeMem Login',
         vscode.ViewColumn.One,
         { enableScripts: true }
     );
@@ -471,11 +592,25 @@ async function handleLogin(username, password) {
             saveCredentials();
             updateStatusBar();
 
+            // Fetch projects after login
+            await fetchProjects();
+
             if (loginPanel) {
                 loginPanel.dispose();
             }
 
             vscode.window.showInformationMessage(`Welcome, ${currentUser.username}!`);
+
+            // If no project, prompt to create one
+            if (userProjects.length === 0) {
+                const action = await vscode.window.showInformationMessage(
+                    'Create your first project to start saving context.',
+                    'Create Project'
+                );
+                if (action === 'Create Project') {
+                    createProject();
+                }
+            }
         } else {
             const error = JSON.parse(result.body);
             if (loginPanel) {
@@ -512,6 +647,15 @@ async function handleRegister(username, password) {
 
             const roleMsg = currentUser.role === 'admin' ? ' (Admin)' : '';
             vscode.window.showInformationMessage(`Account created! Welcome, ${currentUser.username}${roleMsg}`);
+
+            // Prompt to create first project
+            const action = await vscode.window.showInformationMessage(
+                'Create your first project to start saving context.',
+                'Create Project'
+            );
+            if (action === 'Create Project') {
+                createProject();
+            }
         } else {
             const error = JSON.parse(result.body);
             if (loginPanel) {
@@ -542,7 +686,7 @@ async function logout() {
 
     clearCredentials();
     updateStatusBar();
-    vscode.window.showInformationMessage('Logged out of Claude-Mem');
+    vscode.window.showInformationMessage('Logged out of VClaudeMem');
 }
 
 // Helper to make HTTP requests with Promise
@@ -574,86 +718,83 @@ async function saveContext() {
         return;
     }
 
+    if (!currentProject) {
+        const action = await vscode.window.showWarningMessage(
+            'Please select or create a project first',
+            'Select Project', 'Create Project'
+        );
+        if (action === 'Select Project') {
+            selectProject();
+        } else if (action === 'Create Project') {
+            createProject();
+        }
+        return;
+    }
+
+    // Choose context type
+    const contextType = await vscode.window.showQuickPick([
+        { label: '$(note) Note', description: 'Save a general note/learning', value: 'note' },
+        { label: '$(bug) Bug Fix', description: 'Document a bug fix', value: 'bugfix' },
+        { label: '$(star) Feature', description: 'Document a new feature', value: 'feature' },
+        { label: '$(tools) Refactor', description: 'Document a refactoring', value: 'refactor' },
+        { label: '$(lightbulb) Discovery', description: 'Document a discovery', value: 'discovery' }
+    ], { placeHolder: 'What type of context?' });
+
+    if (!contextType) return;
+
     const description = await vscode.window.showInputBox({
-        prompt: 'What did you learn or accomplish?',
-        placeHolder: 'e.g., Fixed authentication bug, Implemented new feature'
+        prompt: 'Describe what you learned or accomplished',
+        placeHolder: 'e.g., Fixed authentication bug by updating token validation'
     });
 
     if (!description) return;
 
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-    const projectName = workspaceFolder ? path.basename(workspaceFolder.uri.fsPath) : 'unknown';
     const cwd = workspaceFolder ? workspaceFolder.uri.fsPath : process.cwd();
-    const contentSessionId = `vscode-manual-${Date.now()}`;
-
-    const headers = {
-        'Content-Type': 'application/json'
-    };
-
-    if (authTokens?.accessToken) {
-        headers['Authorization'] = `Bearer ${authTokens.accessToken}`;
-    }
+    const sessionId = `vscode-${Date.now()}`;
 
     try {
-        // Step 1: Initialize session
-        const initData = JSON.stringify({
-            contentSessionId,
-            project: projectName,
-            prompt: description
-        });
-
-        const initResult = await httpRequest({
-            hostname: getServerHost(),
-            port: getWorkerPort(),
-            path: '/api/sessions/init',
-            method: 'POST',
-            headers: { ...headers, 'Content-Length': Buffer.byteLength(initData) }
-        }, initData);
-
-        if (initResult.statusCode !== 200 && initResult.statusCode !== 201) {
-            throw new Error(`Session init failed: ${initResult.statusCode}`);
-        }
-
-        // Step 2: Save the observation
         const obsData = JSON.stringify({
-            contentSessionId,
-            tool_name: 'VSCode-Manual-Note',
-            tool_input: { description, project: projectName },
+            session_id: sessionId,
+            prompt_number: 1,
+            tool_name: 'VSCode-Manual',
+            tool_input: JSON.stringify({ type: contextType.value, description }),
             tool_response: description,
+            observation_type: contextType.value,
+            narrative: description,
             cwd
         });
 
-        const obsResult = await httpRequest({
+        const result = await httpRequest({
             hostname: getServerHost(),
             port: getWorkerPort(),
-            path: '/api/sessions/observations',
+            path: `/api/projects/${currentProject.id}/observations`,
             method: 'POST',
-            headers: { ...headers, 'Content-Length': Buffer.byteLength(obsData) }
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authTokens.accessToken}`
+            }
         }, obsData);
 
-        if (obsResult.statusCode === 200 || obsResult.statusCode === 201) {
-            const response = JSON.parse(obsResult.body);
-            if (response.status === 'skipped') {
-                vscode.window.showWarningMessage(`Claude-Mem: Skipped - ${response.reason || 'unknown reason'}`);
-            } else {
-                vscode.window.showInformationMessage('Claude-Mem: Context saved!');
-            }
-        } else if (obsResult.statusCode === 401) {
-            // Token expired, try to refresh
+        if (result.statusCode === 201) {
+            vscode.window.showInformationMessage(`Context saved to "${currentProject.name}"!`);
+        } else if (result.statusCode === 401) {
             vscode.window.showWarningMessage('Session expired. Please login again.');
             clearCredentials();
             updateStatusBar();
         } else {
-            vscode.window.showWarningMessage(`Claude-Mem: Could not save context (${obsResult.statusCode})`);
+            const error = JSON.parse(result.body);
+            vscode.window.showErrorMessage(error.error || 'Failed to save context');
         }
     } catch (error) {
-        vscode.window.showErrorMessage(`Claude-Mem: ${error.message || 'Server not running'}`);
+        vscode.window.showErrorMessage(`Failed to save context: ${error.message}`);
     }
 }
 
 function deactivate() {
     if (statusBarItem) statusBarItem.dispose();
     if (loginPanel) loginPanel.dispose();
+    if (projectPanel) projectPanel.dispose();
 }
 
 module.exports = { activate, deactivate };

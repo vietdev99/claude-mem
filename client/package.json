@@ -53,7 +53,7 @@
 			"properties": {
 				"claude-mem.serverUrl": {
 					"type": "string",
-					"default": "http://localhost:37777",
+					"default": "https://mcpclaude.vollx.com",
 					"description": "Claude-Mem server URL"
 				}
 			}
