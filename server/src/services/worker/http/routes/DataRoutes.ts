@@ -12,17 +12,14 @@ import { logger } from '../../../../utils/logger.js';
 import { homedir } from 'os';
 import { getPackageRoot } from '../../../../shared/paths.js';
 import { getWorkerPort } from '../../../../shared/worker-utils.js';
-import { PaginationHelper } from '../../PaginationHelper.js';
 import { DatabaseManager } from '../../DatabaseManager.js';
 import { SessionManager } from '../../SessionManager.js';
 import { SSEBroadcaster } from '../../SSEBroadcaster.js';
 import type { WorkerService } from '../../../worker-service.js';
 import { BaseRouteHandler } from '../BaseRouteHandler.js';
-import { optionalAuthMiddleware, getCurrentUserId, isAdmin } from '../../../server/AuthMiddleware.js';
 
 export class DataRoutes extends BaseRouteHandler {
   constructor(
-    private paginationHelper: PaginationHelper,
     private dbManager: DatabaseManager,
     private sessionManager: SessionManager,
     private sseBroadcaster: SSEBroadcaster,
@@ -33,12 +30,10 @@ export class DataRoutes extends BaseRouteHandler {
   }
 
   setupRoutes(app: express.Application): void {
-    // Pagination endpoints - use optional auth to filter by user when authenticated
-    app.get('/api/observations', optionalAuthMiddleware, this.handleGetObservations.bind(this));
-    app.get('/api/summaries', optionalAuthMiddleware, this.handleGetSummaries.bind(this));
-    app.get('/api/prompts', optionalAuthMiddleware, this.handleGetPrompts.bind(this));
+    // NOTE: Pagination endpoints for observations/summaries/prompts are now in ProjectRoutes.ts
+    // using MongoDB: /api/projects/:projectId/observations, /api/projects/:projectId/summaries, etc.
 
-    // Fetch by ID endpoints
+    // Fetch by ID endpoints (legacy SQLite - keep for backward compatibility)
     app.get('/api/observation/:id', this.handleGetObservationById.bind(this));
     app.post('/api/observations/batch', this.handleGetObservationsByIds.bind(this));
     app.get('/api/session/:id', this.handleGetSessionById.bind(this));
@@ -47,7 +42,7 @@ export class DataRoutes extends BaseRouteHandler {
 
     // Metadata endpoints
     app.get('/api/stats', this.handleGetStats.bind(this));
-    app.get('/api/folder-projects', this.handleGetProjects.bind(this));  // Legacy: folder-based projects
+    // NOTE: /api/folder-projects removed - use /api/projects (MongoDB) instead
 
     // Processing status endpoints
     app.get('/api/processing-status', this.handleGetProcessingStatus.bind(this));
@@ -62,33 +57,6 @@ export class DataRoutes extends BaseRouteHandler {
     // Import endpoint
     app.post('/api/import', this.handleImport.bind(this));
   }
-
-  /**
-   * Get paginated observations
-   */
-  private handleGetObservations = this.wrapHandler((req: Request, res: Response): void => {
-    const { offset, limit, project } = this.parsePaginationParams(req);
-    const result = this.paginationHelper.getObservations(offset, limit, project);
-    res.json(result);
-  });
-
-  /**
-   * Get paginated summaries
-   */
-  private handleGetSummaries = this.wrapHandler((req: Request, res: Response): void => {
-    const { offset, limit, project } = this.parsePaginationParams(req);
-    const result = this.paginationHelper.getSummaries(offset, limit, project);
-    res.json(result);
-  });
-
-  /**
-   * Get paginated user prompts
-   */
-  private handleGetPrompts = this.wrapHandler((req: Request, res: Response): void => {
-    const { offset, limit, project } = this.parsePaginationParams(req);
-    const result = this.paginationHelper.getPrompts(offset, limit, project);
-    res.json(result);
-  });
 
   /**
    * Get observation by ID
@@ -243,26 +211,6 @@ export class DataRoutes extends BaseRouteHandler {
   });
 
   /**
-   * Get list of distinct folder-based projects from observations (legacy)
-   * GET /api/folder-projects
-   */
-  private handleGetProjects = this.wrapHandler((req: Request, res: Response): void => {
-    const db = this.dbManager.getSessionStore().db;
-
-    const rows = db.prepare(`
-      SELECT DISTINCT project
-      FROM observations
-      WHERE project IS NOT NULL
-      GROUP BY project
-      ORDER BY MAX(created_at_epoch) DESC
-    `).all() as Array<{ project: string }>;
-
-    const projects = rows.map(row => row.project);
-
-    res.json({ projects });
-  });
-
-  /**
    * Get current processing status
    * GET /api/processing-status
    */
@@ -286,17 +234,6 @@ export class DataRoutes extends BaseRouteHandler {
 
     res.json({ status: 'ok', isProcessing, queueDepth, activeSessions });
   });
-
-  /**
-   * Parse pagination parameters from request query
-   */
-  private parsePaginationParams(req: Request): { offset: number; limit: number; project?: string } {
-    const offset = parseInt(req.query.offset as string, 10) || 0;
-    const limit = Math.min(parseInt(req.query.limit as string, 10) || 20, 100); // Max 100
-    const project = req.query.project as string | undefined;
-
-    return { offset, limit, project };
-  }
 
   /**
    * Import memories from export file

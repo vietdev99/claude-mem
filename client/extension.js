@@ -354,7 +354,7 @@ async function viewContext() {
 
         if (result.statusCode === 200) {
             const data = JSON.parse(result.body);
-            showContextPanel(data.observations || []);
+            showContextPanel(data.items || []);
         } else if (result.statusCode === 401) {
             vscode.window.showWarningMessage('Session expired. Please login again.');
             clearCredentials();
